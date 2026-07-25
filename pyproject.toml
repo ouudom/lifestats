@@ -20,7 +20,8 @@ dependencies = [
 ]
 
 [project.scripts]
-app = "src.main:run"
+app = "src.dev:run"
+api = "src.main:run"
 google-health-subscriber = "src.modules.google_health.subscriber_cli:run"
 
 [project.optional-dependencies]
