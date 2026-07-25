@@ -57,7 +57,11 @@ export function EvilAnimatedBarChart({
       transition={{ duration: 0.35, ease: [0, 0.7, 0.5, 1] }}
     >
       <ResponsiveContainer height="100%" width="100%">
-        <BarChart data={data} margin={{ bottom: 0, left: -16, right: 4, top: 12 }}>
+        <BarChart
+          accessibilityLayer
+          data={data}
+          margin={{ bottom: 0, left: -16, right: 4, top: 12 }}
+        >
           <CartesianGrid
             stroke="var(--border)"
             strokeDasharray="3 7"
@@ -130,8 +134,9 @@ export function EvilAnimatedLineChart({
   emptyMessage,
   formatValue,
   reference,
+  referenceLabel,
   valueLabel,
-}: CommonChartProps & { reference?: number }) {
+}: CommonChartProps & { reference?: number; referenceLabel?: string }) {
   const reduceMotion = useReducedMotion();
 
   return (
@@ -142,7 +147,11 @@ export function EvilAnimatedLineChart({
       transition={{ duration: 0.35, ease: [0, 0.7, 0.5, 1] }}
     >
       <ResponsiveContainer height="100%" width="100%">
-        <LineChart data={data} margin={{ bottom: 0, left: -16, right: 12, top: 12 }}>
+        <LineChart
+          accessibilityLayer
+          data={data}
+          margin={{ bottom: 0, left: -16, right: 12, top: 12 }}
+        >
           <defs>
             <filter height="200%" id="sleep-line-glow" width="200%" x="-50%" y="-50%">
               <feGaussianBlur result="blur" stdDeviation="3" />
@@ -187,6 +196,16 @@ export function EvilAnimatedLineChart({
           />
           {reference != null && (
             <ReferenceLine
+              label={
+                referenceLabel
+                  ? {
+                      fill: "var(--text-muted)",
+                      fontSize: 10,
+                      position: "insideTopRight",
+                      value: referenceLabel,
+                    }
+                  : undefined
+              }
               stroke="var(--sleep-rem)"
               strokeDasharray="4 6"
               y={reference}
@@ -206,7 +225,7 @@ export function EvilAnimatedLineChart({
             isAnimationActive={!reduceMotion}
             stroke="var(--sleep-rem)"
             strokeWidth={3}
-            type="monotone"
+            type="linear"
           />
         </LineChart>
       </ResponsiveContainer>

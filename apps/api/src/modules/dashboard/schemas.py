@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -68,8 +69,15 @@ class SleepDetailResponse(BaseModel):
     restingHeartRate: float | None
     percentAboveResting: float | None
     percentBelowResting: float | None
-    heartRateAvailability: str
+    heartRateAvailability: Literal[
+        "available",
+        "syncing",
+        "permission-missing",
+        "failed",
+        "not-synced",
+    ]
     heartRateFreshness: str
+    heartRateSource: str
     heartRateDerivation: str
     source: str
     freshness: str

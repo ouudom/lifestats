@@ -1,8 +1,13 @@
-from uuid import uuid4
+from datetime import date
+from uuid import UUID, uuid4
 
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 from src.mcp_server import (
+    MCP_EXCLUDED_DATA_TYPES,
+    _filter_summary,
+    _filter_sync_status,
+    _mcp_data_types,
     _principal,
     _query_token,
     _require_query_scopes,
@@ -10,8 +15,15 @@ from src.mcp_server import (
     disconnect_google_health,
     mcp,
 )
+from src.modules.agent.schemas import (
+    Summary,
+    SummaryMetric,
+    SyncItem,
+    SyncStatus,
+)
 from src.modules.agent_access.schemas import AgentScope
 from src.modules.agent_access.service import AgentPrincipal, McpTokenService
+from src.modules.google_health.registry import DATA_TYPE_REGISTRY
 from starlette.testclient import TestClient
 
 
@@ -129,6 +141,47 @@ def test_generic_query_requires_sensitive_scope_separately() -> None:
             raise AssertionError("ECG query accepted without ecg:read")
     finally:
         _principal.reset(context_token)
+
+
+def test_swim_lengths_data_remains_synced_but_is_not_exposed_through_mcp() -> None:
+    assert MCP_EXCLUDED_DATA_TYPES == {"swim-lengths-data"}
+    assert "swim-lengths-data" in DATA_TYPE_REGISTRY
+    assert "swim-lengths-data" not in _mcp_data_types(None)
+
+    with pytest.raises(ToolError, match="not exposed through MCP"):
+        _mcp_data_types(["swim-lengths-data"])
+
+
+def test_mcp_filters_swim_lengths_data_from_aggregate_results() -> None:
+    visible_metric = SummaryMetric(
+        data_type="steps",
+        value=1000,
+        record_count=1,
+        last_synced_at=None,
+        freshness="fresh",
+        availability="available",
+    )
+    hidden_metric = visible_metric.model_copy(update={"data_type": "swim-lengths-data"})
+    summary = Summary(
+        start=date(2026, 7, 25),
+        end=date(2026, 7, 25),
+        metrics=[visible_metric, hidden_metric],
+    )
+    visible_sync = SyncItem(
+        data_type="steps",
+        status="completed",
+        record_count=1,
+        error=None,
+    )
+    hidden_sync = visible_sync.model_copy(update={"data_type": "swim-lengths-data"})
+    sync_status = SyncStatus(
+        connection_id=UUID("00000000-0000-0000-0000-000000000001"),
+        status="completed",
+        items=[visible_sync, hidden_sync],
+    )
+
+    assert [metric.data_type for metric in _filter_summary(summary).metrics] == ["steps"]
+    assert [item.data_type for item in _filter_sync_status(sync_status).items] == ["steps"]
 
 
 @pytest.mark.asyncio

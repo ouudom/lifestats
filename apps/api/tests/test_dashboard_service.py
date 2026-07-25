@@ -111,19 +111,106 @@ def test_sleep_heart_rate_uses_samples_and_excludes_large_gaps() -> None:
 
     detail = _sleep_heart_rate_detail(records, resting)
 
-    assert detail["averageSleepingHeartRate"] == 66.2
+    assert detail["averageSleepingHeartRate"] == 60.0
     assert detail["restingHeartRate"] == 60.0
     assert detail["percentAboveResting"] == 50.0
     assert detail["percentBelowResting"] == 50.0
     assert len(detail["heartRateSamples"]) == 4
+    assert detail["heartRateSource"] == "Google Health"
 
 
 def test_sleep_heart_rate_is_unavailable_without_samples() -> None:
     detail = _sleep_heart_rate_detail([], None)
 
     assert detail["heartRateAvailability"] == "not-synced"
+    assert detail["heartRateFreshness"] == "unknown"
     assert detail["averageSleepingHeartRate"] is None
     assert detail["percentAboveResting"] is None
+
+
+def test_sleep_heart_rate_selects_one_source_and_deduplicates_timestamps() -> None:
+    first_sync = datetime(2026, 7, 24, 9, 40, tzinfo=UTC)
+    latest_sync = datetime(2026, 7, 24, 9, 45, tzinfo=UTC)
+    records = [
+        SimpleNamespace(
+            source_family="Pixel Watch",
+            started_at=datetime(2026, 7, 23, 18, 0, tzinfo=UTC),
+            last_synced_at=latest_sync,
+            raw_payload={"heartRate": {"beatsPerMinute": 50}},
+        ),
+        SimpleNamespace(
+            source_family="Pixel Watch",
+            started_at=datetime(2026, 7, 23, 18, 10, tzinfo=UTC),
+            last_synced_at=first_sync,
+            raw_payload={"heartRate": {"beatsPerMinute": 70}},
+        ),
+        SimpleNamespace(
+            source_family="Pixel Watch",
+            started_at=datetime(2026, 7, 23, 18, 10, tzinfo=UTC),
+            last_synced_at=latest_sync,
+            raw_payload={"heartRate": {"beatsPerMinute": 80}},
+        ),
+        SimpleNamespace(
+            source_family="Pixel Watch",
+            started_at=datetime(2026, 7, 23, 18, 20, tzinfo=UTC),
+            last_synced_at=latest_sync,
+            raw_payload={"heartRate": {"beatsPerMinute": 60}},
+        ),
+        SimpleNamespace(
+            source_family="Phone",
+            started_at=datetime(2026, 7, 23, 18, 0, tzinfo=UTC),
+            last_synced_at=latest_sync,
+            raw_payload={"heartRate": {"beatsPerMinute": 120}},
+        ),
+        SimpleNamespace(
+            source_family="Phone",
+            started_at=datetime(2026, 7, 23, 18, 5, tzinfo=UTC),
+            last_synced_at=latest_sync,
+            raw_payload={"heartRate": {"beatsPerMinute": 120}},
+        ),
+    ]
+
+    detail = _sleep_heart_rate_detail(records, None)
+
+    assert detail["heartRateSource"] == "Pixel Watch"
+    assert detail["averageSleepingHeartRate"] == 65.0
+    assert detail["heartRateSamples"] == [
+        {
+            "observedAt": datetime(2026, 7, 23, 18, 0, tzinfo=UTC),
+            "beatsPerMinute": 50.0,
+        },
+        {
+            "observedAt": datetime(2026, 7, 23, 18, 10, tzinfo=UTC),
+            "beatsPerMinute": 80.0,
+        },
+        {
+            "observedAt": datetime(2026, 7, 23, 18, 20, tzinfo=UTC),
+            "beatsPerMinute": 60.0,
+        },
+    ]
+
+
+def test_sleep_heart_rate_reports_sync_state_without_using_resting_freshness() -> None:
+    resting = SimpleNamespace(
+        last_synced_at=datetime.now(UTC),
+        raw_payload={"dailyRestingHeartRate": {"beatsPerMinute": 60}},
+    )
+    missing_permission = SimpleNamespace(
+        enabled=False,
+        error="scope_not_granted",
+        status="completed",
+    )
+    failed = SimpleNamespace(enabled=True, error="provider_error", status="failed")
+    running = SimpleNamespace(enabled=True, error=None, status="running")
+
+    permission_detail = _sleep_heart_rate_detail([], resting, missing_permission)
+    failed_detail = _sleep_heart_rate_detail([], resting, failed)
+    running_detail = _sleep_heart_rate_detail([], resting, running)
+
+    assert permission_detail["heartRateAvailability"] == "permission-missing"
+    assert failed_detail["heartRateAvailability"] == "failed"
+    assert running_detail["heartRateAvailability"] == "syncing"
+    assert permission_detail["heartRateFreshness"] == "unknown"
 
 
 def test_insights_aggregate_steps_and_sleep_by_wake_date() -> None:

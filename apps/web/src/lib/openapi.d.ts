@@ -498,10 +498,15 @@ export interface components {
             percentAboveResting: number | null;
             /** Percentbelowresting */
             percentBelowResting: number | null;
-            /** Heartrateavailability */
-            heartRateAvailability: string;
+            /**
+             * Heartrateavailability
+             * @enum {string}
+             */
+            heartRateAvailability: "available" | "syncing" | "permission-missing" | "failed" | "not-synced";
             /** Heartratefreshness */
             heartRateFreshness: string;
+            /** Heartratesource */
+            heartRateSource: string;
             /** Heartratederivation */
             heartRateDerivation: string;
             /** Source */

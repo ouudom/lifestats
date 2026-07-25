@@ -2,7 +2,7 @@
 
 import { Card, Chip, Surface, Typography } from "@heroui/react";
 import { useQuery } from "@tanstack/react-query";
-import { Moon } from "lucide-react";
+import { HeartPulse, Moon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { EvilAnimatedLineChart } from "@/components/charts/EvilCharts";
@@ -16,7 +16,6 @@ import {
   calendarRangeEnd,
   DateRangeControls,
   dateTick,
-  emptyChartSeries,
   insightsPath,
   type RangeKey,
   rangeLabel,
@@ -87,7 +86,7 @@ export function SleepOverview({
             <>
               <SleepHero detail={detail} timezone={dayData.timezone} />
               <SleepTimeline detail={detail} timezone={dayData.timezone} />
-              {/* <SleepingHeartRate detail={detail} timezone={dayData.timezone} /> */}
+              <SleepingHeartRate detail={detail} timezone={dayData.timezone} />
               <SleepFacts detail={detail} />
             </>
           ) : (
@@ -480,6 +479,11 @@ function SleepingHeartRate({
   timezone: string;
 }) {
   const chartData: { label: string; value: number | null; detail: string }[] = [];
+  const rates = detail.heartRateSamples.map((sample) => sample.beatsPerMinute);
+  const minimum = rates.length ? Math.min(...rates) : null;
+  const maximum = rates.length ? Math.max(...rates) : null;
+  const available =
+    detail.heartRateAvailability === "available" && detail.heartRateSamples.length > 0;
   detail.heartRateSamples.forEach((sample, index) => {
     const previous = detail.heartRateSamples[index - 1];
     if (
@@ -509,7 +513,11 @@ function SleepingHeartRate({
         <SectionHeader
           action={
             <Chip size="sm" variant="soft">
-              <Chip.Label>{detail.heartRateFreshness}</Chip.Label>
+              <Chip.Label>
+                {detail.heartRateAvailability === "available"
+                  ? detail.heartRateFreshness
+                  : availabilityLabel(detail.heartRateAvailability)}
+              </Chip.Label>
             </Chip>
           }
           eyebrow={`${formatTime(detail.startAt, timezone)}–${formatTime(detail.endAt, timezone)}`}
@@ -518,7 +526,7 @@ function SleepingHeartRate({
         />
       </Card.Header>
       <Card.Content className="grid gap-6">
-        {detail.heartRateSamples.length ? (
+        {available ? (
           <>
             <div className="flex flex-wrap items-end gap-2">
               <span className="text-5xl font-bold tracking-[-0.04em] tabular-nums max-sm:text-4xl">
@@ -530,8 +538,17 @@ function SleepingHeartRate({
               data={chartData}
               formatValue={(value) => `${Math.round(value)}`}
               reference={detail.restingHeartRate ?? undefined}
+              referenceLabel={
+                detail.restingHeartRate == null
+                  ? undefined
+                  : `Resting ${Math.round(detail.restingHeartRate)} bpm`
+              }
               valueLabel="bpm"
             />
+            <Typography.Paragraph color="muted" size="sm">
+              {detail.heartRateSamples.length.toLocaleString()} samples ·{" "}
+              {formatBpm(minimum)}–{formatBpm(maximum)}
+            </Typography.Paragraph>
             <div className="grid gap-4" aria-label="Compared with resting heart rate">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <Typography weight="semibold">Compared with resting heart rate</Typography>
@@ -560,21 +577,56 @@ function SleepingHeartRate({
               )}
             </div>
           </>
+        ) : detail.heartRateAvailability === "failed" ? (
+          <AppAlert
+            message="The last Google Health heart-rate sync failed. The next sync will retry."
+            title="Sleeping heart rate sync failed"
+          />
         ) : (
           <EmptyContent
-            description="No Google Health heart-rate samples were synced during this sleep period."
-            icon="♥"
-            title="Sleeping heart rate unavailable"
+            description={heartRateEmptyDescription(detail.heartRateAvailability)}
+            icon={<HeartPulse className="size-6" />}
+            title={heartRateEmptyTitle(detail.heartRateAvailability)}
           />
         )}
       </Card.Content>
       <Card.Footer>
         <Typography.Paragraph color="muted" size="xs">
-          {detail.heartRateDerivation}
+          {detail.heartRateSource} · {detail.heartRateDerivation}
         </Typography.Paragraph>
       </Card.Footer>
     </Card>
   );
+}
+
+function availabilityLabel(availability: SleepDetail["heartRateAvailability"]): string {
+  return {
+    available: "Available",
+    failed: "Sync failed",
+    "not-synced": "Not synced",
+    "permission-missing": "Permission required",
+    syncing: "Syncing",
+  }[availability];
+}
+
+function heartRateEmptyTitle(
+  availability: SleepDetail["heartRateAvailability"],
+): string {
+  if (availability === "permission-missing") return "Google Health permission required";
+  if (availability === "syncing") return "Sleeping heart rate syncing";
+  return "Sleeping heart rate unavailable";
+}
+
+function heartRateEmptyDescription(
+  availability: SleepDetail["heartRateAvailability"],
+): string {
+  if (availability === "permission-missing") {
+    return "Reconnect Google Health and grant health metrics access.";
+  }
+  if (availability === "syncing") {
+    return "Heart-rate data is syncing. This panel will update when sync completes.";
+  }
+  return "No Google Health heart-rate samples were synced during this sleep period.";
 }
 
 function ComparisonBar({

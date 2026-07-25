@@ -50,6 +50,7 @@ from src.modules.google_health.registry import (
 )
 
 _principal: ContextVar[AgentPrincipal | None] = ContextVar("mcp_principal", default=None)
+MCP_EXCLUDED_DATA_TYPES = frozenset({"swim-lengths-data"})
 mcp = FastMCP(
     "LifeStats",
     instructions=(
@@ -90,7 +91,7 @@ async def _run[T](
 
 
 def _require_query_scopes(principal: AgentPrincipal, data_types: list[str] | None) -> None:
-    selected = data_types or list(DATA_TYPE_REGISTRY)
+    selected = _mcp_data_types(data_types)
     unknown = set(selected) - DATA_TYPE_REGISTRY.keys()
     if unknown:
         raise ToolError(f"Unsupported Google Health data type: {', '.join(sorted(unknown))}")
@@ -105,6 +106,70 @@ def _require_query_scopes(principal: AgentPrincipal, data_types: list[str] | Non
     for data_type in selected:
         required = scope_map[DATA_TYPE_REGISTRY[data_type].scope]
         _require_scope(principal, required)
+
+
+def _mcp_data_types(data_types: list[str] | None) -> list[str]:
+    if data_types is None:
+        return [
+            data_type
+            for data_type in DATA_TYPE_REGISTRY
+            if data_type not in MCP_EXCLUDED_DATA_TYPES
+        ]
+    excluded = set(data_types) & MCP_EXCLUDED_DATA_TYPES
+    if excluded:
+        detail = ", ".join(sorted(excluded))
+        raise ToolError(f"Google Health data type is not exposed through MCP: {detail}")
+    return data_types
+
+
+def _filter_capabilities(capabilities: Capabilities) -> Capabilities:
+    return capabilities.model_copy(
+        update={
+            "items": [
+                item for item in capabilities.items if item.data_type not in MCP_EXCLUDED_DATA_TYPES
+            ]
+        }
+    )
+
+
+def _filter_freshness(report: FreshnessReport) -> FreshnessReport:
+    return report.model_copy(
+        update={
+            "items": [
+                item for item in report.items if item.data_type not in MCP_EXCLUDED_DATA_TYPES
+            ]
+        }
+    )
+
+
+def _filter_summary(summary: Summary) -> Summary:
+    return summary.model_copy(
+        update={
+            "metrics": [
+                metric
+                for metric in summary.metrics
+                if metric.data_type not in MCP_EXCLUDED_DATA_TYPES
+            ]
+        }
+    )
+
+
+def _filter_today(today: Today) -> Today:
+    return today.model_copy(
+        update={
+            "sync": [item for item in today.sync if item.data_type not in MCP_EXCLUDED_DATA_TYPES],
+        }
+    )
+
+
+def _filter_sync_status(status: SyncStatus) -> SyncStatus:
+    return status.model_copy(
+        update={
+            "items": [
+                item for item in status.items if item.data_type not in MCP_EXCLUDED_DATA_TYPES
+            ],
+        }
+    )
 
 
 @mcp.custom_route(  # type: ignore[untyped-decorator]
@@ -123,8 +188,8 @@ async def get_profile() -> Profile:
 @mcp.tool()
 async def list_capabilities() -> Capabilities:
     """List Google Health data types, grants, availability, and supported operations."""
-    return await _run(
-        AgentScope.PROFILE_READ, lambda service, user: service.list_capabilities(user)
+    return _filter_capabilities(
+        await _run(AgentScope.PROFILE_READ, lambda service, user: service.list_capabilities(user))
     )
 
 
@@ -169,13 +234,17 @@ async def disconnect_google_health(confirm: bool = False) -> DisconnectResult:
 @mcp.tool()
 async def get_data_freshness() -> FreshnessReport:
     """Return freshness and record counts for every supported Google Health type."""
-    return await _run(AgentScope.SYNC_READ, lambda service, user: service.get_data_freshness(user))
+    return _filter_freshness(
+        await _run(AgentScope.SYNC_READ, lambda service, user: service.get_data_freshness(user))
+    )
 
 
 @mcp.tool()
 async def get_today(day: date | None = None) -> Today:
     """Return Google Health-backed Today data for one local calendar date."""
-    return await _run(AgentScope.TODAY_READ, lambda service, user: service.get_today(user, day))
+    return _filter_today(
+        await _run(AgentScope.TODAY_READ, lambda service, user: service.get_today(user, day))
+    )
 
 
 @mcp.tool()
@@ -187,9 +256,11 @@ async def get_timeline(day: date | None = None) -> Timeline:
 @mcp.tool()
 async def get_fitness_summary(request: DateRange) -> Summary:
     """Summarize synced fitness data over a date range."""
-    return await _run(
-        AgentScope.FITNESS_READ,
-        lambda service, user: service.get_fitness_summary(user, request),
+    return _filter_summary(
+        await _run(
+            AgentScope.FITNESS_READ,
+            lambda service, user: service.get_fitness_summary(user, request),
+        )
     )
 
 
@@ -212,6 +283,7 @@ async def get_exercise(record_id: UUID) -> HealthRecord:
 @mcp.tool()
 async def get_activity_trend(request: TrendQuery) -> Trend:
     """Return a fitness data-type trend over a date range."""
+    _mcp_data_types([request.data_type])
     return await _run(
         AgentScope.FITNESS_READ,
         lambda service, user: service.get_activity_trend(user, request),
@@ -303,9 +375,13 @@ async def get_measurement_trend(request: TrendQuery) -> Trend:
 async def query_health_data(request: RecordQuery) -> RecordPage:
     """Query synced types allowed by the token's category and sensitive-data scopes."""
     principal = _current_principal()
-    _require_query_scopes(principal, request.data_types)
+    selected = _mcp_data_types(request.data_types)
+    _require_query_scopes(principal, selected)
+    effective_request = request.model_copy(update={"data_types": selected})
     async with SessionFactory() as db:
-        return await AgentService(db, get_settings()).query_health_data(principal.user_id, request)
+        return await AgentService(db, get_settings()).query_health_data(
+            principal.user_id, effective_request
+        )
 
 
 @mcp.tool()
@@ -374,12 +450,15 @@ async def get_body_measurements(request: RecordQuery) -> RecordPage:
 @mcp.tool()
 async def get_sync_status() -> SyncStatus:
     """Return synchronization status for all Google Health data types."""
-    return await _run(AgentScope.SYNC_READ, lambda service, user: service.get_sync_status(user))
+    return _filter_sync_status(
+        await _run(AgentScope.SYNC_READ, lambda service, user: service.get_sync_status(user))
+    )
 
 
 @mcp.tool()
 async def get_data_type_sync_status(data_type: str) -> SyncItem:
     """Return synchronization status for one Google Health data type."""
+    _mcp_data_types([data_type])
     return await _run(
         AgentScope.SYNC_READ,
         lambda service, user: service.get_data_type_sync_status(user, data_type),
@@ -389,8 +468,20 @@ async def get_data_type_sync_status(data_type: str) -> SyncItem:
 @mcp.tool()
 async def trigger_sync(command: SyncCommand) -> SyncQueued:
     """Queue a bounded Google Health synchronization for the authenticated user."""
-    return await _run(
-        AgentScope.SYNC_WRITE, lambda service, user: service.trigger_sync(user, command)
+    if command.data_types is not None:
+        _mcp_data_types(command.data_types)
+    result = await _run(
+        AgentScope.SYNC_WRITE,
+        lambda service, user: service.trigger_sync(user, command),
+    )
+    return result.model_copy(
+        update={
+            "data_types": [
+                data_type
+                for data_type in result.data_types
+                if data_type not in MCP_EXCLUDED_DATA_TYPES
+            ]
+        }
     )
 
 
