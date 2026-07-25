@@ -13,7 +13,7 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import Settings, get_settings
@@ -28,6 +28,7 @@ from src.modules.google_health.dependencies import (
     get_google_health_repository,
     get_google_health_service,
 )
+from src.modules.google_health.events import stream_sync_events
 from src.modules.google_health.oauth import OAuthService
 from src.modules.google_health.repository import GoogleHealthRepository
 from src.modules.google_health.schemas import SyncRequest
@@ -133,6 +134,27 @@ async def list_sync_jobs(
         return await service.sync_jobs(principal.user_id)
     except NotFoundError as exc:
         raise translate_service_error(exc) from exc
+
+
+@router.get("/sync/events", response_class=StreamingResponse, include_in_schema=False)
+async def sync_events(
+    request: Request,
+    principal: Annotated[Principal, Depends(current_principal)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StreamingResponse:
+    return StreamingResponse(
+        stream_sync_events(
+            settings.redis_url,
+            user_id=principal.user_id,
+            is_disconnected=request.is_disconnected,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/sync/{data_type}")

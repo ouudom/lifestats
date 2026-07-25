@@ -46,6 +46,7 @@ def test_router_exposes_v2_sync_and_connection_surface() -> None:
         ("/integrations/google-health/disconnect", "POST"),
         ("/sync", "GET"),
         ("/sync", "POST"),
+        ("/sync/events", "GET"),
         ("/sync/{data_type}", "GET"),
         ("/sync/{data_type}", "POST"),
     } <= methods_by_path

@@ -56,9 +56,6 @@ export function DashboardShell({
             </Avatar>
             <div className="min-w-0">
               <Typography weight="bold">LifeStats</Typography>
-              {/* <Typography className="block" color="muted" type="body-xs">
-                Google Health companion
-              </Typography> */}
             </div>
           </div>
 

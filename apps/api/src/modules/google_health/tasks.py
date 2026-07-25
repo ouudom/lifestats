@@ -9,6 +9,7 @@ from celery import Celery
 from src.core.config import get_settings
 from src.core.database import SessionFactory, engine
 from src.core.logging import configure_logging
+from src.modules.google_health.events import publish_sync_completed
 from src.modules.google_health.sync import (
     SyncService,
     claim_due_jobs,
@@ -140,6 +141,25 @@ async def _sync_google_health_type(
             "status": outcome.status,
         },
     )
+    if outcome.status == "completed":
+        try:
+            await publish_sync_completed(
+                settings.redis_url,
+                user_id=outcome.user_id,
+                data_type=outcome.data_type,
+                record_count=outcome.record_count,
+                trigger=trigger,
+            )
+        except Exception:
+            logger.exception(
+                "Google Health sync event publication failed",
+                extra={
+                    "event": "google_health_sync_event_publish_failed",
+                    "connection_id": str(connection_id),
+                    "data_type": data_type,
+                    "trigger": trigger,
+                },
+            )
 
 
 async def _dispatch_google_health() -> None:

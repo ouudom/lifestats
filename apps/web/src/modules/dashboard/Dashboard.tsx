@@ -2,6 +2,7 @@
 
 import { Spinner, Typography } from "@heroui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { AppAlert } from "@/components/ui/AppAlert";
 import { AppButton } from "@/components/ui/AppButton";
 import { api } from "@/lib/api";
@@ -25,6 +26,23 @@ type IntegrationStatus = {
 
 export function Dashboard({ email, view }: { email: string; view: DashboardView }) {
   const client = useQueryClient();
+  useEffect(() => {
+    const events = new EventSource("/api/v1/sync/events");
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const refreshDashboard = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        void client.invalidateQueries({ queryKey: ["dashboard"] });
+      }, 250);
+    };
+    events.addEventListener("sync-completed", refreshDashboard);
+    return () => {
+      clearTimeout(refreshTimer);
+      events.removeEventListener("sync-completed", refreshDashboard);
+      events.close();
+    };
+  }, [client]);
+
   const dashboard = useQuery({
     queryKey: ["dashboard", "current"],
     queryFn: () => api<DashboardData>("/dashboard"),

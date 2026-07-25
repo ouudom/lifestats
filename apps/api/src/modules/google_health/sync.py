@@ -41,6 +41,7 @@ PAGE_TOKEN_RESET_FAILURE_THRESHOLD = 2
 
 @dataclass(frozen=True, slots=True)
 class SyncOutcome:
+    user_id: int
     data_type: str
     record_count: int
     status: str
@@ -193,10 +194,10 @@ class SyncService:
         if job is None:
             raise RuntimeError("Google Health sync job was not seeded")
         if not job.enabled:
-            return SyncOutcome(data_type.endpoint_id, 0, "disabled")
+            return SyncOutcome(connection.user_id, data_type.endpoint_id, 0, "disabled")
         now = utc_now()
         if job.status == "running" and job.lease_until and job.lease_until > now:
-            return SyncOutcome(data_type.endpoint_id, 0, "leased")
+            return SyncOutcome(connection.user_id, data_type.endpoint_id, 0, "leased")
         job.status = "running"
         job.lease_until = now + LEASE_DURATION
         await self.db.commit()
@@ -212,7 +213,7 @@ class SyncService:
             job.next_poll_at = next_allowed_poll(now, timezone)
             job.lease_until = None
             await self.db.commit()
-            return SyncOutcome(data_type.endpoint_id, 0, "deferred")
+            return SyncOutcome(connection.user_id, data_type.endpoint_id, 0, "deferred")
 
         if job.next_page_token and job.range_start and job.range_end:
             range_start, range_end = job.range_start, job.range_end
@@ -269,7 +270,7 @@ class SyncService:
             next_regular_poll(now, data_type, timezone) if caught_up else utc_now()
         )
         await self.db.commit()
-        return SyncOutcome(data_type.endpoint_id, count, "completed")
+        return SyncOutcome(connection.user_id, data_type.endpoint_id, count, "completed")
 
     async def _sync_window(
         self,
